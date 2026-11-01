@@ -413,8 +413,13 @@ class AlphaRemoteService : CompanionDeviceService() {
         while ((pendingActionSteps.peek() is CAButton || pendingActionSteps.peek() is CAJog)) {
             pendingActionSteps.poll()?.let {
                 updatePendingActionStatistics()
-                if (it is CAButton && it.button == ButtonCode.SHUTTER_FULL && it.pressed)
-                    expectedExposureCount = (currentCameraState()?.exposureCount ?: 0) + 1
+                if (it is CAButton && it.button == ButtonCode.SHUTTER_FULL && it.pressed) {
+                    // A press while the shutter is open (closing a bulb exposure) does not start a new exposure
+                    currentCameraState()?.let { state ->
+                        if (!state.shutter.state)
+                            expectedExposureCount = state.exposureCount + 1
+                    }
+                }
                 val generation = writeGeneration
                 if (cameraBLE?.executeCameraActionStep(it) { onCameraActionStepWritten(generation) } == true)
                     unacknowledgedWrites++
