@@ -57,6 +57,11 @@ class AlphaRemoteService : CompanionDeviceService() {
     private val scope = CoroutineScope(Dispatchers.IO + job)
 
     private var timer: TimerTask? = null
+    private var countdownRunning = false
+    private var unacknowledgedWrites = 0   //Button/jog writes of the current sequence not yet acknowledged by the camera
+    private var writeGeneration = 0        //Incremented on cancellation to ignore acknowledgements of old sequences
+    private var expectedExposureCount = 0  //Exposure count the camera reaches with the last shutter press, see checkWaitAction
+    private var exposureTimeout: TimerTask? = null
     private var notificationUI: NotificationUI? = null
 
     private lateinit var pendingActionsWakeLock: PowerManager.WakeLock
@@ -95,6 +100,8 @@ class AlphaRemoteService : CompanionDeviceService() {
         const val ADVANCED_SEQUENCE_INTENT_INTERVAL_DURATION_EXTRA = "interval"
         const val ADVANCED_SEQUENCE_INTENT_INTERVAL_COUNT_EXTRA = "count"
         const val ADVANCED_SEQUENCE_INTENT_FOCUS_BRACKETING_AMOUNT_EXTRA = "focus_step"
+
+        private const val EXPOSURE_START_TIMEOUT = 5000L
 
         private var pendingActionSteps = LinkedList<CameraActionStep>()
         var broadcastControl = false
@@ -289,7 +296,7 @@ class AlphaRemoteService : CompanionDeviceService() {
                         CAButton(pressed = true, ButtonCode.SHUTTER_HALF), //Dismiss immediate preview by half pressing shutter
                         CAButton(pressed = false, ButtonCode.SHUTTER_HALF),
                         CAJog(true, JogCode.FOCUS_FAR.maxStep, JogCode.FOCUS_FAR),
-                        CACountdown(getString(R.string.camera_advanced_focus_bracketing_timer_label), focusBracketingAmount),
+                        CACountdown(getString(R.string.camera_advanced_focus_bracketing_timer_label), focusBracketingAmount, measuresHold = true),
                         CAJog(false, JogCode.FOCUS_FAR.maxStep, JogCode.FOCUS_FAR)
                     )
                 } else listOf()
@@ -319,6 +326,12 @@ class AlphaRemoteService : CompanionDeviceService() {
     fun cancelPendingActionSteps(): Boolean {
         var pendingStepsCancelled = false
         timer?.cancel()
+        countdownRunning = false
+        unacknowledgedWrites = 0
+        writeGeneration++
+        expectedExposureCount = 0
+        exposureTimeout?.cancel()
+        exposureTimeout = null
         if (pendingActionSteps.isNotEmpty()) {
             pendingActionSteps.clear()
             for (button in ButtonCode.entries) {
@@ -379,17 +392,44 @@ class AlphaRemoteService : CompanionDeviceService() {
     }
 
     @Synchronized
+    fun onCameraActionStepWritten(generation: Int) {
+        if (generation != writeGeneration)
+            return //Belongs to a cancelled sequence
+        unacknowledgedWrites--
+        if (unacknowledgedWrites > 0)
+            return
+        when (pendingActionSteps.peek()) {
+            is CACountdown -> if (!countdownRunning) executeNextCameraActionStep() //Countdown was waiting for these writes
+            is CAWaitFor -> currentCameraState()?.let { checkWaitAction(it) }
+            else -> {}
+        }
+    }
+
+    private fun currentCameraState(): CameraStateReady? = cameraBLE?.cameraState?.value as? CameraStateReady
+
+    @Synchronized
     fun executeNextCameraActionStep() {
         updatePendingActionStatistics()
         while ((pendingActionSteps.peek() is CAButton || pendingActionSteps.peek() is CAJog)) {
             pendingActionSteps.poll()?.let {
                 updatePendingActionStatistics()
-                cameraBLE?.executeCameraActionStep(it)
+                if (it is CAButton && it.button == ButtonCode.SHUTTER_FULL && it.pressed)
+                    expectedExposureCount = (currentCameraState()?.exposureCount ?: 0) + 1
+                val generation = writeGeneration
+                if (cameraBLE?.executeCameraActionStep(it) { onCameraActionStepWritten(generation) } == true)
+                    unacknowledgedWrites++
             }
         }
+        // Countdowns that measure how long a button or jog is held only start once the camera
+        // has received all previous events. Otherwise BLE latency (one or more connection
+        // intervals per write) is subtracted from the hold time, which makes short focus steps
+        // erratic. Other countdowns (interval, bulb) keep their timing relative to the sequence.
+        if ((pendingActionSteps.peek() as? CACountdown)?.measuresHold == true && unacknowledgedWrites > 0)
+            return
         (pendingActionSteps.peek() as? CACountdown)?.let { step ->
             val time = (step.duration * 1000).roundToLong()
             timer?.cancel()
+            countdownRunning = true
             timer = Timer().schedule(time) {
                 countdownActionComplete()
             }
@@ -400,15 +440,12 @@ class AlphaRemoteService : CompanionDeviceService() {
             notificationUI?.showCountdown(targetTime, step.label)
             return
         }
-        (serviceState.value as? ServiceRunning)?.let {
-            (it.cameraState as? CameraStateReady)?.let { cameraState ->
-                checkWaitAction(cameraState)
-            }
-        }
+        currentCameraState()?.let { checkWaitAction(it) }
     }
 
     @Synchronized
     fun countdownActionComplete() {
+        countdownRunning = false
         _serviceState.update {
             (it as? ServiceRunning)?.copy(countdown = null, countdownLabel = null) ?: it
         }
@@ -422,20 +459,49 @@ class AlphaRemoteService : CompanionDeviceService() {
 
     @Synchronized
     fun checkWaitAction(state: CameraStateReady) {
-        val nextAction = pendingActionSteps.peek()
-        if (nextAction is CAWaitFor) {
-            when (nextAction.target) {
-                WaitTarget.FOCUS -> if (state.focus.state != nextAction.invert) {
-                    pendingActionSteps.removeFirst()
-                    executeNextCameraActionStep()
-                }
-                WaitTarget.SHUTTER -> if (state.shutter.state != nextAction.invert) {
-                    pendingActionSteps.removeFirst()
-                    executeNextCameraActionStep()
-                }
-                WaitTarget.RECORDING -> if (state.recording.state != nextAction.invert) {
-                    pendingActionSteps.removeFirst()
-                    executeNextCameraActionStep()
+        val nextAction = pendingActionSteps.peek() as? CAWaitFor ?: return
+        // The state is only meaningful once the camera has received all previous commands.
+        // Otherwise, for example, a wait for the end of an exposure would pass immediately
+        // while the shutter press is still in the BLE queue.
+        if (unacknowledgedWrites > 0)
+            return
+        val satisfied = when (nextAction.target) {
+            WaitTarget.FOCUS -> state.focus.state != nextAction.invert
+            WaitTarget.SHUTTER -> if (expectedExposureCount == 0) {
+                state.shutter.state != nextAction.invert
+            } else {
+                // A shutter wait refers to the exposure of the last shutter press. Exposure
+                // starts are counted, as short exposures can start and end between two checks.
+                val started = state.exposureCount >= expectedExposureCount
+                if (!started)
+                    startExposureTimeout()
+                started && (!nextAction.invert || !state.shutter.state)
+            }
+            WaitTarget.RECORDING -> state.recording.state != nextAction.invert
+        }
+        if (satisfied) {
+            exposureTimeout?.cancel()
+            exposureTimeout = null
+            pendingActionSteps.removeFirst()
+            executeNextCameraActionStep()
+        }
+    }
+
+    private fun startExposureTimeout() {
+        if (exposureTimeout != null)
+            return
+        val generation = writeGeneration
+        exposureTimeout = Timer().schedule(EXPOSURE_START_TIMEOUT) {
+            synchronized(this@AlphaRemoteService) {
+                if (generation != writeGeneration || exposureTimeout == null)
+                    return@schedule
+                exposureTimeout = null
+                // The camera did not start an exposure (for example because it was busy). Do not
+                // block the sequence forever, but continue as if this shutter press was lost.
+                Log.w(MainActivity.TAG, "No exposure reported after shutter press, continuing.")
+                currentCameraState()?.let {
+                    expectedExposureCount = it.exposureCount
+                    checkWaitAction(it)
                 }
             }
         }

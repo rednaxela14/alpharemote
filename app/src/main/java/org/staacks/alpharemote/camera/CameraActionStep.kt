@@ -6,7 +6,8 @@ sealed class CameraActionStep
 
 data class CACountdown (
     val label: String,
-    val duration: Float
+    val duration: Float,
+    val measuresHold: Boolean = false   //Start only once the camera has received the preceding button/jog press, so the duration is the actual hold time
 ) : CameraActionStep()
 
 data class CAWaitFor (

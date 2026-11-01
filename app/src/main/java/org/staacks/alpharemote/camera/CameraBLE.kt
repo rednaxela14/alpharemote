@@ -265,10 +265,17 @@ class CameraBLE(val scope: CoroutineScope, context: Context, val address: String
         }
     }
 
-    @Synchronized
     fun resetOperationQueue() {
-        operationQueue.clear()
-        currentOperation = null
+        // Writes that are dropped here will never be acknowledged. Report them as failed, so
+        // nobody waits for them forever. Callbacks are invoked outside of the lock as they may
+        // call back into code that enqueues new operations.
+        val dropped = synchronized(this) {
+            val ops = listOfNotNull(currentOperation) + operationQueue
+            operationQueue.clear()
+            currentOperation = null
+            ops
+        }
+        dropped.forEach { (it as? CameraBLEWrite)?.completeCallback?.invoke(-1) }
     }
 
     @OptIn(ExperimentalStdlibApi::class)
@@ -331,7 +338,9 @@ class CameraBLE(val scope: CoroutineScope, context: Context, val address: String
     fun cameraBLEWriteComplete(status: Int) {
         Log.d(MainActivity.TAG, "Writing complete: $status")
         if (currentOperation is CameraBLEWrite) {
+            val callback = (currentOperation as CameraBLEWrite).completeCallback
             operationComplete()
+            callback?.invoke(status)
             if (status == 144) {
                 //The command failed. This is very likely a properly bonded camera with BLE remote setting disabled
                 _cameraState.value = CameraStateRemoteDisabled()
@@ -371,7 +380,13 @@ class CameraBLE(val scope: CoroutineScope, context: Context, val address: String
                     it as CameraStateReady
                 when (value[1]) {
                     0x3f.toByte() -> state.copy(focus = ReportedBoolean(value[2].and(0x20.toByte()) != 0.toByte()))
-                    0xa0.toByte() -> state.copy(shutter = ReportedBoolean(value[2].and(0x20.toByte()) != 0.toByte()))
+                    0xa0.toByte() -> {
+                        val shutter = value[2].and(0x20.toByte()) != 0.toByte()
+                        state.copy(
+                            shutter = ReportedBoolean(shutter),
+                            exposureCount = if (shutter && !state.shutter.state) state.exposureCount + 1 else state.exposureCount
+                        )
+                    }
                     0xd5.toByte() -> state.copy(recording = ReportedBoolean(value[2].and(0x20.toByte()) != 0.toByte()))
                     else -> state
                 }
@@ -381,15 +396,19 @@ class CameraBLE(val scope: CoroutineScope, context: Context, val address: String
         Log.d(MainActivity.TAG, "Received status: 0x${value.toHexString()}")
     }
 
-    fun executeCameraActionStep(action: CameraActionStep) {
+    /**
+     * Sends a button or jog step. Returns true if a write has been queued, in which case
+     * completeCallback is called once with the write status (-1 if the write was dropped).
+     */
+    fun executeCameraActionStep(action: CameraActionStep, completeCallback: ((Int) -> Unit)? = null): Boolean {
         Log.d(MainActivity.TAG, "executeCameraActionStep")
         if (cameraState.value !is CameraStateReady)
-            return
+            return false
         try {
             commandCharacteristic?.let { char ->
                 when (action) {
                     is CAButton -> {
-                        enqueueOperation(CameraBLEWrite(char, byteArrayOf(0x01, action.getCode())))
+                        enqueueOperation(CameraBLEWrite(char, byteArrayOf(0x01, action.getCode()), completeCallback))
                         _cameraState.update {
                             (it as? CameraStateReady)?.copy(
                                 pressedButtons = if (action.pressed) it.pressedButtons + action.button else it.pressedButtons - action.button
@@ -397,19 +416,21 @@ class CameraBLE(val scope: CoroutineScope, context: Context, val address: String
                         }
                     }
                     is CAJog -> {
-                        enqueueOperation(CameraBLEWrite(char, byteArrayOf(0x02, action.getCode(), if (action.pressed) action.step else 0x00)))
+                        enqueueOperation(CameraBLEWrite(char, byteArrayOf(0x02, action.getCode(), if (action.pressed) action.step else 0x00), completeCallback))
                         _cameraState.update {
                             (it as? CameraStateReady)?.copy(
                                 pressedJogs = if (action.pressed) it.pressedJogs + action.jog else it.pressedJogs - action.jog
                             ) ?: it
                         }
                     }
-                    else -> Unit //Countdown and wait for event are handled by service
+                    else -> return false //Countdown and wait for event are handled by service
                 }
+                return true
             }
         } catch (e: SecurityException) {
             _cameraState.value = CameraStateError(e)
             Log.e(MainActivity.TAG, e.toString())
         }
+        return false
     }
 }

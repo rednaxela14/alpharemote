@@ -33,7 +33,8 @@ data class CameraStateReady(
     val shutter: ReportedBoolean,
     val recording: ReportedBoolean,
     val pressedButtons: Set<ButtonCode>,
-    val pressedJogs: Set<JogCode>
+    val pressedJogs: Set<JogCode>,
+    val exposureCount: Int = 0 //Counts reported exposure starts, so even exposures shorter than a state update are not missed
 ) : CameraState()
 
 data class CameraStateError(

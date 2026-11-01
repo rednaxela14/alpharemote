@@ -52,7 +52,7 @@ data class CameraAction (
     fun getClickStepList(context: Context): List<CameraActionStep> {
         return if (duration != null) {
             val label = context.getString(R.string.hold_button)
-            getPressStepList(context) + listOf(CACountdown(label, duration)) + getReleaseStepList()
+            getPressStepList(context) + listOf(CACountdown(label, duration, measuresHold = true)) + getReleaseStepList()
         } else {
             getPressStepList(context) + getReleaseStepList()
         }
