@@ -114,6 +114,16 @@ Please let me know if your camera works if it has not yet been confirmed here.
 </details>
 
 <details>
+  <summary>Focus bracketing (or the focus buttons) move the focus erratically!</summary>
+
+  Turn off **MF Assist** in your camera's settings. With MF Assist enabled, the camera treats the remote's focus commands like turning a focus ring with acceleration: The first focus command after a picture only opens the magnified view, while every further command moves the focus much further than it should. Depending on the timing, the focus then either does not move at all or races to the end of its range. This affects any way of sending focus commands, so the app cannot work around it. Unfortunately, the app can neither read nor change this setting.
+
+  With MF Assist turned off, the focus moves at a steady rate for as long as the focus button is held (the "speed" of the button press makes no difference on the cameras tested so far). The focus drive duration of focus bracketing therefore translates into the size of each step. Since this step grows with the focus distance in a similar way as the depth of field does, a duration that works well at one distance should also work at other distances. Start with a short duration and increase it until the in-focus areas of consecutive pictures just overlap.
+
+  Auto Review is not a problem as the app dismisses the review before moving the focus. If you want to know more, see the [measurements in issue #33](https://github.com/Staacks/alpharemote/issues/33).
+</details>
+
+<details>
   <summary>Button xy does not have the function it should have!</summary>
 
   The app can only send button presses, but not status commands. It can press the "AF ON" button, but if cannot tell the camera to go to manual focus. The virtual "AF ON" button will do whatever your physical button does. So, if it does something unexpected, this is either a quirk from your camera model, it is because you changed its function or it might be in that mode. (This especially gives the "C1" button a very special role as the most versatile one supported by the remote.)

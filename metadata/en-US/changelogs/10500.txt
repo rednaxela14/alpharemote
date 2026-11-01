@@ -1,0 +1,4 @@
+- Fix focus bracketing: The focus drive duration is now the actual time the focus moves. Before, Bluetooth delays could eat up most of it, so short durations barely moved the focus and pictures could be skipped.
+- Sequences now wait for the camera's actual exposure before continuing.
+- Button hold durations are now measured from when the camera receives the press.
+- Add a hint to turn off MF Assist for focus bracketing.

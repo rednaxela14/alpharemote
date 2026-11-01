@@ -23,7 +23,7 @@
     <string name="camera_advanced_interval_timer_label">Intervall</string>
     <string name="camera_advanced_focus_bracketing_title">Focus Bracketing</string>
     <string name="camera_advanced_focus_bracketing_step_duration">Dauer der Fokusänderung</string>
-    <string name="camera_advanced_focus_bracketing_note">Für diese Funktion musst du die Kamera auf manuellen Fokus stellen.</string>
+    <string name="camera_advanced_focus_bracketing_note">Für diese Funktion musst du die Kamera auf manuellen Fokus stellen und die MF-Unterstützung ausschalten. Sonst bewegt sich der Fokus unberechenbar.</string>
     <string name="camera_advanced_focus_bracketing_timer_label">Fokus</string>
     <string name="camera_advanced_pending_triggers">%1$d verbleibend</string>
     <string name="camera_advanced_start">Start</string>

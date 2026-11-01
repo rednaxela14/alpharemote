@@ -1,0 +1,4 @@
+- Focus Bracketing korrigiert: Die Dauer der Fokusänderung ist jetzt die tatsächliche Zeit, in der sich der Fokus bewegt. Vorher fraßen Bluetooth-Verzögerungen oft den Großteil davon, sodass kurze Zeiten kaum wirkten und Bilder ausfallen konnten.
+- Abläufe warten jetzt auf die tatsächliche Belichtung der Kamera.
+- Haltezeiten von Tasten zählen jetzt ab Empfang durch die Kamera.
+- Hinweis ergänzt, für Focus Bracketing die MF-Unterstützung auszuschalten.
