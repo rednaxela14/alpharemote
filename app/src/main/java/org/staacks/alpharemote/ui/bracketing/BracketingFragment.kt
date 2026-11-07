@@ -25,6 +25,7 @@ class BracketingFragment : Fragment() {
     private var end: Float? = null
     private var step = 0.3f
     private var settle = 0.6f
+    private var speed = 0.08f   // Anteil der max. Fokusgeschwindigkeit (0.01..1)
     private lateinit var info: TextView
     private lateinit var go: Button
 
@@ -43,13 +44,14 @@ class BracketingFragment : Fragment() {
     }
 
     private fun holdButton(label: String, preset: CameraActionPreset, dir: Int): Button {
-        val action = CameraAction(false, null, null, 1f, preset) // volle Geschwindigkeit
         var t0 = 0L
+        var action = CameraAction(false, null, null, speed, preset)
         return Button(requireContext()).apply {
             text = label
             setOnTouchListener { v, ev ->
                 when (ev.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
+                        action = CameraAction(false, null, null, speed, preset)
                         t0 = SystemClock.elapsedRealtime()
                         AlphaRemoteService.sendCameraAction(requireContext(), action, down = true, up = false)
                     }
@@ -76,6 +78,21 @@ class BracketingFragment : Fragment() {
             Button(ctx).apply { text = "Start setzen"; setOnClickListener { start = pos; refresh() } },
             Button(ctx).apply { text = "Ende setzen"; setOnClickListener { end = pos; refresh() } }))
 
+        val speedLabel = TextView(ctx).apply { text = "Fokusgeschwindigkeit: 8 %  (niedrig = langsame, feine Fahrt)" }
+        col.addView(speedLabel)
+        col.addView(SeekBar(ctx).apply {
+            max = 99; progress = 7
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, p: Int, u: Boolean) {
+                    speed = (p + 1) / 100f
+                    speedLabel.text = "Fokusgeschwindigkeit: ${p + 1} %  (niedrig = langsame, feine Fahrt)"
+                    if (u) { pos = 0f; start = null; end = null; if (::info.isInitialized) refresh() }
+                }
+                override fun onStartTrackingTouch(sb: SeekBar?) {}
+                override fun onStopTrackingTouch(sb: SeekBar?) {}
+            })
+        })
+
         val dial = DialView(ctx).apply { onChange = { step = it; if (::info.isInitialized) refresh() } }
         col.addView(TextView(ctx).apply { text = "Schrittweite (Drehrad)"; textSize = 13f; setPadding(0, (12 * dp).toInt(), 0, 0) })
         col.addView(dial, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -101,6 +118,7 @@ class BracketingFragment : Fragment() {
                     putExtra(AlphaRemoteService.BRACKET_COUNT_EXTRA, count())
                     putExtra(AlphaRemoteService.BRACKET_STEP_EXTRA, step)
                     putExtra(AlphaRemoteService.BRACKET_SETTLE_EXTRA, settle)
+                    putExtra(AlphaRemoteService.BRACKET_SPEED_EXTRA, speed)
                     putExtra(AlphaRemoteService.BRACKET_DIR_EXTRA, if (e > s) 1 else -1)
                     putExtra(AlphaRemoteService.BRACKET_APPROACH_EXTRA, s - pos)
                 }

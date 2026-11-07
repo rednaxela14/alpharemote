@@ -49,6 +49,7 @@ import java.util.Timer
 import java.util.TimerTask
 import kotlin.concurrent.schedule
 import kotlin.math.max
+import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 
@@ -95,6 +96,7 @@ class AlphaRemoteService : CompanionDeviceService() {
         const val BRACKET_STEP_EXTRA = "br_step"
         const val BRACKET_SETTLE_EXTRA = "br_settle"
         const val BRACKET_DIR_EXTRA = "br_dir"
+        const val BRACKET_SPEED_EXTRA = "br_speed"
         const val BRACKET_APPROACH_EXTRA = "br_approach"
 
         const val ADVANCED_SEQUENCE_INTENT_ACTION = "ADVANCED_SEQUENCE"
@@ -267,13 +269,15 @@ class AlphaRemoteService : CompanionDeviceService() {
                 val settleS = intent.getFloatExtra(BRACKET_SETTLE_EXTRA, 0.6f)
                 val dir = intent.getIntExtra(BRACKET_DIR_EXTRA, 1)
                 val approach = intent.getFloatExtra(BRACKET_APPROACH_EXTRA, 0f)
+                val speed = intent.getFloatExtra(BRACKET_SPEED_EXTRA, 0.08f)
+                val sb = (speed * 127f).roundToInt().coerceIn(1, 127).toByte()
                 val label = getString(R.string.camera_advanced_focus_bracketing_timer_label)
                 val steps: MutableList<CameraActionStep> = mutableListOf()
                 if (kotlin.math.abs(approach) > 0.01f) {
                     val j = if (approach > 0) JogCode.FOCUS_FAR else JogCode.FOCUS_NEAR
-                    steps += CAJog(true, j.maxStep, j)
+                    steps += CAJog(true, sb, j)
                     steps += CACountdown(label, kotlin.math.abs(approach))
-                    steps += CAJog(false, j.maxStep, j)
+                    steps += CAJog(false, sb, j)
                     steps += CACountdown(label, settleS)
                 }
                 val jog = if (dir > 0) JogCode.FOCUS_FAR else JogCode.FOCUS_NEAR
@@ -286,9 +290,9 @@ class AlphaRemoteService : CompanionDeviceService() {
                         steps += CAWaitFor(WaitTarget.SHUTTER, true)
                         steps += CAButton(pressed = true, ButtonCode.SHUTTER_HALF)
                         steps += CAButton(pressed = false, ButtonCode.SHUTTER_HALF)
-                        steps += CAJog(true, jog.maxStep, jog)
+                        steps += CAJog(true, sb, jog)
                         steps += CACountdown(label, stepS)
-                        steps += CAJog(false, jog.maxStep, jog)
+                        steps += CAJog(false, sb, jog)
                         steps += CACountdown(label, settleS)
                     }
                 }
