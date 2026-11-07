@@ -13,6 +13,11 @@
     </fragment>
 
     <fragment
+        android:id="@+id/navigation_bracketing"
+        android:name="org.staacks.alpharemote.ui.bracketing.BracketingFragment"
+        android:label="@string/title_bracketing" />
+
+    <fragment
         android:id="@+id/navigation_about"
         android:name="org.staacks.alpharemote.ui.about.AboutFragment"
         android:label="@string/title_about"
